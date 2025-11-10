@@ -12,6 +12,10 @@ dependencies:
     sdk: flutter
   http: ^1.2.1 
   cloud_firestore: ^6.1.0
+  # For Google Sign-In
+  google_sign_in: ^7.2.0
+  firebase_auth: ^6.1.2
+
 
 dev_dependencies:
   flutter_test:
@@ -21,3 +25,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/
