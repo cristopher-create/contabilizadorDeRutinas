@@ -1,100 +1,80 @@
 // lib/services/auth_service.dart
-
-import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart'; // <-- 1. ¡ASEGÚRATE DE QUE ESTE IMPORT ESTÉ ASÍ!
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart';
 import 'dart:convert';
-
-// ¡¡IMPORTANTE!! DEBES IMPORTAR ESTO:
-import 'package:google_sign_in_platform_interface/google_sign_in_platform_interface.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Asumo que también usarás Firebase Auth
-
+import 'package:flutter/foundation.dart'; // Para debugPrint
 
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn(); // <-- 2. AHORA ESTA LÍNEA FUNCIONARÁ
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // Tu código de login con backend (¡esto está bien!)
+  // Tu código de login con backend
   final String _backendBaseUrl = 'https://flores57backend.onrender.com';
   Future<bool> login(String idInspector, String password) async {
-     // ... tu código de login con http ...
-     return false; // Tu lógica aquí
+    // ... tu código de login con http ...
+    debugPrint('Función de login backend llamada');
+    return false; // Tu lógica aquí
   }
 
+  // --- CÓDIGO CORREGIDO PARA GOOGLE SIGN-IN ---
 
-  // --- NUEVO CÓDIGO PARA GOOGLE SIGN-IN ---
-
-  // Futuro que se completa cuando init() se ha llamado
-  Future<void>? _initialization;
-
-  // Función para asegurar que Google Sign-In esté inicializado
-  Future<void> _ensureInitialized() {
-    return _initialization ??= GoogleSignInPlatform.instance.init(
-      const InitParameters(),
-    )..catchError((dynamic _) {
-      _initialization = null;
-    });
-  }
-
-
-  // 1. MÉTODO PARA INICIAR SESIÓN CON GOOGLE
   Future<UserCredential?> signInWithGoogle() async {
     try {
-      // Asegura que esté inicializado
-      await _ensureInitialized();
+      // 1. Disparar el flujo de autenticación de Google
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
 
-      // 1. Inicia el flujo de autenticación de Google (reemplaza a .signIn())
-      final AuthenticationResults result = await GoogleSignInPlatform.instance
-          .authenticate(const AuthenticateParameters());
-
-      final GoogleSignInUserData googleUser = result.user;
-
-      // Si el usuario cancela
+      // 2. Si el usuario cancela
       if (googleUser == null) {
-        debugPrint('Inicio de sesión de Google cancelado.');
-        return null;
-      }
-      
-      // 2. Obtén los tokens
-      final ClientAuthorizationTokenData? tokens = await GoogleSignInPlatform
-          .instance
-          .clientAuthorizationTokensForScopes(
-            ClientAuthorizationTokensForScopesParameters(
-              request: AuthorizationRequestDetails(
-                scopes: ['email', 'profile'], // Pide los scopes que necesites
-                userId: googleUser.id,
-                email: googleUser.email,
-                promptIfUnauthorized: false,
-              ),
-            ),
-          );
-
-      if (tokens == null) {
-        debugPrint('No se pudieron obtener los tokens de Google.');
-        return null;
+        debugPrint('Inicio de sesión cancelado por el usuario.');
+        return null; 
       }
 
-      // 3. Crea la credencial de Firebase con el token (reemplaza tu error 3)
+      // 3. Obtener los detalles de autenticación
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      // 4. Crear una credencial de Firebase
       final AuthCredential credential = GoogleAuthProvider.credential(
-        idToken: tokens.idToken,           // ¡Usa el idToken para Firebase!
-        accessToken: tokens.accessToken, // Y/o el accessToken
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
       );
 
-      // 4. Inicia sesión en Firebase con esa credencial
-      return await _firebaseAuth.signInWithCredential(credential);
+      // 5. Iniciar sesión en Firebase
+      final UserCredential userCredential =
+          await _firebaseAuth.signInWithCredential(credential);
+      final User? user = userCredential.user;
 
-    } on GoogleSignInException catch (e) {
-      debugPrint('Error de GoogleSignInException ${e.code}: ${e.description}');
-      return null;
+      // 6. (Bonus) Guardar/Actualizar el usuario en Firestore
+      if (user != null) {
+        if (userCredential.additionalUserInfo?.isNewUser ?? false) {
+          await _db.collection('users').doc(user.uid).set({
+            'displayName': user.displayName,
+            'email': user.email,
+            'photoURL': user.photoURL,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          debugPrint('Nuevo usuario creado en Firestore');
+        } else {
+          debugPrint('Usuario existente ha iniciado sesión');
+        }
+      }
+
+      // 7. Devuelve el UserCredential completo
+      return userCredential;
+
     } catch (e) {
-      debugPrint('Error inesperado en signInWithGoogle: $e');
+      debugPrint("Error en Google Sign-In: $e");
       return null;
     }
   }
 
   // MÉTODO PARA CERRAR SESIÓN
   Future<void> signOut() async {
-    await _ensureInitialized();
-    await GoogleSignInPlatform.instance.disconnect(const DisconnectParams());
+    await _googleSignIn.signOut();
     await _firebaseAuth.signOut();
+    debugPrint('Usuario cerró sesión');
   }
 }
